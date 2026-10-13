@@ -1,0 +1,7 @@
+# Файлы для Linux (Proxmox) всегда с LF, иначе systemd и shebang ломаются после checkout на Windows
+*.py text eol=lf
+*.service text eol=lf
+*.sh text eol=lf
+
+# Командные файлы Windows
+*.bat text eol=crlf

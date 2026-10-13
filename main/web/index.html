@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ESP32 ETH01 - Power controller</title>
+<link rel="icon" href="data:,">
+<style>
+  :root {
+    --bg: #2b2b2b; --card: #3d3d3d; --field: #2b2b2b; --line: #555;
+    --text: #fff; --muted: #aaa; --radius: 10px;
+    --green: #28a745; --blue: #007bff; --red: #dc3545; --yellow: #ffc107;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 20px 16px;
+    background: var(--bg); color: var(--text);
+    font: 16px/1.4 Arial, sans-serif;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+  }
+  h2 { margin: 0 0 6px; }
+  h3 { margin: 0 0 4px; font-size: 18px; }
+  .card, .sub { width: 100%; max-width: 555px; }
+  .sub { margin-bottom: 16px; }
+  .card { background: var(--card); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; }
+  .card p { margin: 6px 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .big { font-size: 18px; }
+  label { display: block; margin: 8px 0 3px; font-size: 14px; color: #ccc; }
+  input {
+    width: 100%; padding: 10px;
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: var(--field); color: var(--text);
+    font-size: 16px; text-align: center; outline: none;
+  }
+  input:focus { border-color: var(--blue); }
+  input.bad { border-color: var(--red); }
+  input.ok { border-color: var(--green); }
+  .hint { margin-top: 2px; font-size: 13px; }
+  .hint:empty { display: none; }
+  .hint.bad, .error { color: var(--red); }
+  .hint.ok { color: var(--green); }
+  .hint.pending { color: var(--muted); }
+  .online { color: var(--green); font-weight: bold; }
+  .offline { color: var(--red); font-weight: bold; }
+  .unknown { color: var(--yellow); font-weight: bold; }
+  .check-ok { color: var(--green); }
+  .check-fail { color: var(--red); }
+  .check-wait { color: var(--yellow); }
+  .block { margin-top: 12px; }
+  .block > div:empty { display: none; }
+  .block .label { color: #ccc; font-size: 14px; }
+  .strong { font-weight: bold; }
+  label.check { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 0; font-size: 16px; color: var(--text); cursor: pointer; }
+  input[type=checkbox] { width: 20px; height: 20px; margin: 0; accent-color: var(--green); cursor: pointer; }
+  input:disabled { opacity: .45; }
+</style>
+</head>
+<body>
+  <h2>ESP32 ETH01 - Power controller</h2>
+  <div class="sub muted">
+    <div>ESP32: <span id="eth">–</span> | работает <span id="uptime">–</span></div>
+    <div>Питание: <span id="in_power">–</span> | Кнопка: <span id="in_button">–</span></div>
+    <div>Выход 1: <span id="out_io32">–</span> | Выход 2: <span id="out_io33">–</span></div>
+    <div class="error" id="conn"></div>
+    <div class="error" id="test_banner"></div>
+  </div>
+
+  <div class="card">
+    <p class="big">Сервер: <span id="state" class="unknown">Загрузка…</span></p>
+    <p class="muted" id="state_detail"></p>
+
+    <div class="block">
+      <div class="label">Сценарий:</div>
+      <div id="sc_name" class="strong"></div>
+      <div id="sc_result"></div>
+      <div id="sc_detail" class="muted"></div>
+      <div id="sc_time" class="muted"></div>
+    </div>
+
+    <div class="block">
+      <div class="label">Последняя команда:</div>
+      <div id="cmd_name" class="strong"></div>
+      <div id="cmd_result"></div>
+      <div id="cmd_detail" class="muted"></div>
+      <div id="cmd_time" class="muted"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Сервер</h3>
+    
+    <label for="ip">IP-адрес сервера</label>
+    <input id="ip" inputmode="decimal" maxlength="15" placeholder="192.168.1.200" autocomplete="off" spellcheck="false">
+    <div class="hint" id="ip_hint"></div>
+
+    <label for="port">HTTP-порт сервера</label>
+    <input id="port" inputmode="numeric" maxlength="5" placeholder="8080" autocomplete="off">
+    <div class="hint" id="port_hint"></div>
+
+    <label for="mac">MAC-адрес сервера (для WOL)</label>
+    <input id="mac" maxlength="17" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    <div class="hint" id="mac_hint"></div>
+
+    <label for="wol_port">UDP-порт WOL</label>
+    <input id="wol_port" inputmode="numeric" maxlength="5" placeholder="9" autocomplete="off">
+    <div class="hint" id="wol_port_hint"></div>
+
+    <label for="ping_path">HTTP команда пинга (пусто – только ICMP)</label>
+    <input id="ping_path" maxlength="63" placeholder="/ping" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="hint" id="ping_path_hint"></div>
+
+    <label for="poweroff_path">HTTP команда выключения</label>
+    <input id="poweroff_path" maxlength="63" placeholder="/poweroff" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <div class="hint" id="poweroff_path_hint"></div>
+  </div>
+
+  <div class="card">
+    <h3>Задержки сценариев</h3>
+
+    <label for="mains_lost_s">Подтверждение исчезновения питания, с</label>
+    <input id="mains_lost_s" inputmode="numeric" maxlength="5" placeholder="600" autocomplete="off">
+    <div class="hint" id="mains_lost_s_hint"></div>
+
+    <label for="mains_restore_s">Подтверждение появления питания, с</label>
+    <input id="mains_restore_s" inputmode="numeric" maxlength="5" placeholder="60" autocomplete="off">
+    <div class="hint" id="mains_restore_s_hint"></div>
+
+    <label for="ping_interval_s">Интервал пинга сервера, с</label>
+    <input id="ping_interval_s" inputmode="numeric" maxlength="4" placeholder="10" autocomplete="off">
+    <div class="hint" id="ping_interval_s_hint"></div>
+
+    <label for="off_wait_s">Ожидание выключения после команды, с</label>
+    <input id="off_wait_s" inputmode="numeric" maxlength="4" placeholder="60" autocomplete="off">
+    <div class="hint" id="off_wait_s_hint"></div>
+
+    <label for="on_wait_s">Ожидание включения после команды, с</label>
+    <input id="on_wait_s" inputmode="numeric" maxlength="4" placeholder="60" autocomplete="off">
+    <div class="hint" id="on_wait_s_hint"></div>
+
+    <label for="attempts">Попыток отправки команды</label>
+    <input id="attempts" inputmode="numeric" maxlength="2" placeholder="3" autocomplete="off">
+    <div class="hint" id="attempts_hint"></div>
+
+    <p class="muted">Если после команды сервер не перешёл в нужное состояние за время ожидания,
+      команда повторяется. Ожидание стоит делать больше интервала пинга.</p>
+  </div>
+
+  <div class="card">
+    <h3>Управляемые выходы</h3>
+
+    <label class="check"><input type="checkbox" id="outputs_enabled"> Управлять выходами по питанию</label>
+    <div class="hint" id="outputs_enabled_hint"></div>
+    <p class="muted">Выключено – оба выхода всегда включены. Включено – выход отключается, когда питания
+      нет дольше заданного времени, и включается, когда питание есть дольше заданного времени.</p>
+
+    <label for="io32_off_s">Выход 1: выключение после пропадания питания, с</label>
+    <input id="io32_off_s" inputmode="numeric" maxlength="5" placeholder="60" autocomplete="off">
+    <div class="hint" id="io32_off_s_hint"></div>
+
+    <label for="io32_on_s">Выход 1: включение после появления питания, с</label>
+    <input id="io32_on_s" inputmode="numeric" maxlength="5" placeholder="60" autocomplete="off">
+    <div class="hint" id="io32_on_s_hint"></div>
+
+    <label for="io33_off_s">Выход 2: выключение после пропадания питания, с</label>
+    <input id="io33_off_s" inputmode="numeric" maxlength="5" placeholder="60" autocomplete="off">
+    <div class="hint" id="io33_off_s_hint"></div>
+
+    <label for="io33_on_s">Выход 2: включение после появления питания, с</label>
+    <input id="io33_on_s" inputmode="numeric" maxlength="5" placeholder="60" autocomplete="off">
+    <div class="hint" id="io33_on_s_hint"></div>
+  </div>
+
+<script>
+'use strict';
+const $ = id => document.getElementById(id);
+
+// Валидаторы повторяют правила прошивки (main/src/app_config.c), окончательная проверка – на ESP32.
+const IP_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const MAC_RE = /^[0-9A-F]{2}([:-])[0-9A-F]{2}(\1[0-9A-F]{2}){4}$|^[0-9A-F]{12}$/i;
+const PATH_RE = /^\/[A-Za-z0-9._~\/?=&-]*$/;
+
+function checkIp(v) {
+  const first = +v.split('.')[0];
+  return IP_RE.test(v) && first !== 0 && first !== 127 && first < 224
+    ? '' : 'Нужен IPv4-адрес хоста, например 192.168.1.200';
+}
+function checkMac(v) {
+  const hex = v.replace(/[:-]/g, '');
+  return MAC_RE.test(v) && !(parseInt(hex.slice(0, 2), 16) & 1) && !/^0+$/.test(hex)
+    ? '' : 'Нужен MAC сетевой карты, например AA:BB:CC:DD:EE:FF';
+}
+function checkPath(allowEmpty) {
+  return v => {
+    if (v === '') return allowEmpty ? '' : 'Путь обязателен';
+    return v.length < 64 && PATH_RE.test(v) ? '' : 'Путь начинается с /, допустимы A-Z a-z 0-9 - . _ ~ / ? = &';
+  };
+}
+function checkRange(min, max, message) {
+  return v => /^\d{1,5}$/.test(v) && +v >= min && +v <= max ? '' : message;
+}
+const normNumber = v => String(+v);
+const normMac = v => v.replace(/[:-]/g, '').toUpperCase().match(/../g).join(':');
+
+const port = { check: checkRange(1, 65535, 'Порт: целое число от 1 до 65535'), norm: normNumber };
+const seconds = (min, max) => ({ check: checkRange(min, max, 'Целое число секунд от ' + min + ' до ' + max), norm: normNumber });
+
+// norm приводит значение к виду, в котором его хранит ESP32
+const FIELDS = {
+  ip: { check: checkIp },
+  port: port,
+  mac: { check: checkMac, norm: normMac },
+  wol_port: port,
+  ping_path: { check: checkPath(true) },
+  poweroff_path: { check: checkPath(false) },
+  mains_lost_s: seconds(1, 3600),
+  mains_restore_s: seconds(1, 3600),
+  ping_interval_s: seconds(2, 300),
+  off_wait_s: seconds(5, 300),
+  on_wait_s: seconds(5, 300),
+  attempts: { check: checkRange(1, 10, 'Целое число от 1 до 10'), norm: normNumber },
+  io32_off_s: seconds(0, 36000),
+  io32_on_s: seconds(0, 36000),
+  io33_off_s: seconds(0, 36000),
+  io33_on_s: seconds(0, 36000),
+};
+const OUTPUT_FIELDS = ['io32_off_s', 'io32_on_s', 'io33_off_s', 'io33_on_s'];
+
+const saved = {}, timers = {}, fades = {}, seqs = {};
+let loaded = false;
+
+async function request(url, options = {}, timeoutMs = 5000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal, cache: 'no-store' });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+// ---------- Настройки: проверка при вводе, автосохранение с дебаунсом ----------
+
+function mark(key, cls, text) {
+  $(key).className = cls;
+  const hint = $(key + '_hint');
+  hint.className = 'hint ' + cls;
+  hint.textContent = text;
+}
+
+// Значение поля в виде для сохранения или null, если оно некорректно
+function normalized(key) {
+  const f = FIELDS[key], v = $(key).value.trim();
+  if (f.check(v)) return null;
+  return f.norm ? f.norm(v) : v;
+}
+
+function edited(key) {
+  clearTimeout(timers[key]);
+  clearTimeout(fades[key]);
+  const error = FIELDS[key].check($(key).value.trim());
+  if (error) return mark(key, 'bad', error);
+  if (normalized(key) === saved[key]) return mark(key, '', '');
+  mark(key, 'pending', 'Изменено…');
+  timers[key] = setTimeout(() => save(key), 800);
+}
+
+async function save(key) {
+  clearTimeout(timers[key]);
+  const value = normalized(key);
+  if (value === null || value === saved[key]) return;
+  const seq = seqs[key] = (seqs[key] || 0) + 1;
+  mark(key, 'pending', 'Сохранение…');
+  try {
+    const r = await request('/api/config', { method: 'POST', body: new URLSearchParams({ [key]: value }) });
+    const j = await r.json().catch(() => ({}));
+    if (seq !== seqs[key]) return;                          // ответ на устаревшее сохранение
+    if (!r.ok || !j.ok) return mark(key, 'bad', j.error || 'Ошибка ' + r.status);
+    applyConfig(j.config);
+    if (normalized(key) !== saved[key]) return edited(key); // пока сохраняли, ввод продолжился
+    if (document.activeElement !== $(key)) $(key).value = saved[key];
+    mark(key, 'ok', 'Сохранено');
+    fades[key] = setTimeout(() => mark(key, '', ''), 2500);
+  } catch (e) {
+    if (seq !== seqs[key]) return;
+    mark(key, 'bad', 'Нет связи с ESP32, повтор через 3 с…');
+    timers[key] = setTimeout(() => save(key), 3000);
+  }
+}
+
+// Обновляет сохранённые значения; поля, которые сейчас редактируются, не трогает
+function applyConfig(cfg) {
+  for (const key in FIELDS) {
+    const el = $(key), value = String(cfg[key]);
+    const clean = !loaded || (document.activeElement !== el && el.value.trim() === saved[key]);
+    saved[key] = value;
+    if (clean) el.value = value;
+  }
+  if (!outputsSaving) setOutputsEnabled(cfg.outputs_enabled === 1);
+  loaded = true;
+}
+
+// ---------- Галочка управления выходами: сохраняется сразу ----------
+
+let outputsSaving = false;
+
+function setOutputsEnabled(enabled) {
+  $('outputs_enabled').checked = enabled;
+  for (const key of OUTPUT_FIELDS) $(key).disabled = !enabled;
+}
+
+$('outputs_enabled').addEventListener('change', async () => {
+  const box = $('outputs_enabled'), enabled = box.checked;
+  const hint = $('outputs_enabled_hint');
+  outputsSaving = true;
+  setOutputsEnabled(enabled);
+  hint.className = 'hint pending';
+  hint.textContent = 'Сохранение…';
+  try {
+    const r = await request('/api/config', { method: 'POST', body: new URLSearchParams({ outputs_enabled: enabled ? '1' : '0' }) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok || !j.ok) throw new Error(j.error || 'Ошибка ' + r.status);
+    hint.className = 'hint ok';
+    hint.textContent = 'Сохранено';
+    setTimeout(() => { if (hint.textContent === 'Сохранено') hint.textContent = ''; }, 2500);
+  } catch (e) {
+    setOutputsEnabled(!enabled);
+    hint.className = 'hint bad';
+    hint.textContent = e.message.startsWith('Ошибка') ? e.message : 'Не сохранено: ' + e.message;
+  }
+  outputsSaving = false;
+});
+
+for (const key in FIELDS) {
+  $(key).addEventListener('input', () => edited(key));
+  $(key).addEventListener('change', () => save(key));   // потеря фокуса или Enter – сохранить сразу
+}
+
+// ---------- Состояние ----------
+
+const STATES = { online: 'Онлайн', offline: 'Офлайн', unknown: 'Неизвестно' };
+const COMMANDS = { wol: 'Power ON (WOL)', poweroff: 'Power OFF' };
+const SCENARIOS = {
+  power_on: 'Включение: питание появилось',
+  power_off: 'Выключение: питание пропало',
+  manual_off: 'Ручной перезапуск: выключение',
+  manual_on: 'Ручной перезапуск: включение',
+};
+const RESULTS = {
+  done: ['выполнен', 'check-ok'],
+  failed: ['не выполнен: сервер не перешёл в нужное состояние', 'check-fail'],
+  aborted: ['прерван: запущен другой сценарий', 'check-wait'],
+  timeout: ['сервер не стал недоступен, переход к WOL', 'check-wait'],
+};
+
+function ago(s) {
+  if (s < 60) return s + ' с назад';
+  if (s < 3600) return Math.floor(s / 60) + ' мин назад';
+  return Math.floor(s / 3600) + ' ч назад';
+}
+
+function duration(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s / 3600) % 24, m = Math.floor(s / 60) % 60;
+  return (d ? d + ' д ' : '') + (d || h ? h + ' ч ' : '') + m + ' мин ' + s % 60 + ' с';
+}
+
+// Обратный отсчёт: до минуты в секундах, дальше в минутах и секундах
+function left(s) {
+  return s < 60 ? s + ' с' : Math.floor(s / 60) + ' мин ' + s % 60 + ' с';
+}
+
+function span(cls, text) {
+  const el = document.createElement('span');
+  el.className = cls;
+  el.textContent = text;
+  return el;
+}
+
+// Результаты ICMP и HTTP показываются раздельно: сервер онлайн, если ответила любая проверка
+function renderChecks(srv) {
+  const parts = [];
+  if (srv.state === 'unknown') {
+    parts.push(srv.detail);
+  } else {
+    parts.push(span(srv.icmp.ok ? 'check-ok' : 'check-fail',
+      srv.icmp.ok ? 'ICMP ' + srv.icmp.rtt_ms + ' мс' : 'ICMP нет ответа'), ' | ');
+    parts.push(srv.http.enabled ? span(srv.http.ok ? 'check-ok' : 'check-fail', srv.http.detail) : 'HTTP выкл.');
+  }
+  if (srv.checked_ago_s >= 0) parts.push(', ' + ago(srv.checked_ago_s));
+  $('state_detail').replaceChildren(...parts);
+}
+
+function line(id, text, cls) {
+  $(id).textContent = text || '';
+  $(id).className = cls || '';
+}
+
+// Блок из строк: название, результат, (подробности), время
+function renderBlock(prefix, name, result, resultCls, detail, time) {
+  line(prefix + '_name', name, 'strong');
+  line(prefix + '_result', result, resultCls);
+  line(prefix + '_detail', detail ? '(' + detail + ')' : '', 'muted');
+  line(prefix + '_time', time, 'muted');
+}
+
+function renderCommand(c) {
+  if (c.busy) renderBlock('cmd', COMMANDS[c.pending] || 'Команда', 'выполняется…', 'check-wait');
+  else if (c.name === 'none') renderBlock('cmd', '–');
+  else renderBlock('cmd', COMMANDS[c.name], c.ok ? 'выполнено' : 'ошибка',
+    c.ok ? 'check-ok' : 'check-fail', c.detail, ago(c.ago_s));
+}
+
+function renderScenario(a, serverState) {
+  if (a.scenario !== 'none') {
+    let detail;
+    if (a.waiting_shutdown) detail = 'сервер ещё выключается после Power OFF, ожидание ещё ' + left(a.next_step_s);
+    else if (a.attempts === 0 || serverState === 'unknown') detail = 'ожидание состояния сервера';
+    else if (a.attempts < a.max_attempts) detail = 'повтор через ' + left(a.next_step_s);
+    else detail = 'ожидание результата ещё ' + left(a.next_step_s);
+    renderBlock('sc', SCENARIOS[a.scenario], 'выполняется', 'check-wait',
+      'команд отправлено: ' + a.attempts + ' из ' + a.max_attempts + ', ' + detail);
+  } else if (a.last.scenario !== 'none') {
+    const [text, cls] = RESULTS[a.last.result] || [a.last.result, ''];
+    renderBlock('sc', SCENARIOS[a.last.scenario], text, cls,
+      'команд отправлено: ' + a.last.attempts, ago(a.last.ago_s));
+  } else {
+    renderBlock('sc', a.confirm_left_s > 0 ? 'ожидание подтверждения питания' : 'не запускался');
+  }
+}
+
+function render(s) {
+  const state = $('state');
+  state.textContent = STATES[s.server.state] || STATES.unknown;
+  state.className = STATES[s.server.state] ? s.server.state : 'unknown';
+  renderChecks(s.server);
+
+  renderScenario(s.auto, s.server.state);
+  renderCommand(s.command);
+
+  $('eth').textContent = !s.eth.link ? 'нет кабеля'
+    : !s.eth.has_ip ? 'ожидание DHCP…' : s.eth.ip + ' | ' + s.eth.mac;
+  $('in_power').textContent = (s.inputs.power_failure ? 'нет' : 'да')
+    + (s.auto.confirm_left_s > 0 ? ' (подтверждение ' + left(s.auto.confirm_left_s) + ')' : '');
+  $('in_button').textContent = (s.inputs.button ? 'нажата' : 'отпущена')
+    + (s.auto.hold_left_s > 0 ? ' (перезапуск через ' + s.auto.hold_left_s + ' с)' : '');
+  $('uptime').textContent = duration(s.uptime_s);
+  for (const io of ['io32', 'io33']) {
+    const o = s.outputs[io];
+    $('out_' + io).textContent = (o.high ? 'вкл.' : 'выкл.')
+      + (o.change_in_s > 0 ? ' (' + (o.high ? 'выкл.' : 'вкл.') + ' через ' + left(o.change_in_s) + ')' : '')
+      + (s.outputs.enabled ? '' : ' (управление выкл.)');
+  }
+  $('test_banner').textContent = s.test_hooks
+    ? 'Тестовая прошивка: входы IO35/IO36 и ICMP подменяются через /api/test' : '';
+  applyConfig(s.config);
+}
+
+let polling = false;
+
+// Следующий запрос – только после завершения предыдущего, запросы не копятся
+async function poll() {
+  if (polling) return;
+  polling = true;
+  let next = 1000;
+  try {
+    const s = await (await request('/status')).json();
+    render(s);
+    $('conn').textContent = '';
+    if (s.command.busy) next = 500;
+  } catch (e) {
+    $('conn').textContent = 'Нет связи с ESP32';
+  }
+  polling = false;
+  setTimeout(poll, next);
+}
+
+poll();
+</script>
+</body>
+</html>

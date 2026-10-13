@@ -1,0 +1,72 @@
+# Сборка ESP-IDF: build, тестовая build_test и любые другие build*
+build*/
+*.o
+*.a
+*.out
+*.bin
+*.elf
+*.map
+flasher_args.json
+
+# Конфигурация ESP-IDF: sdkconfig создаётся из sdkconfig.defaults
+sdkconfig
+sdkconfig.old
+
+# Компоненты из менеджера компонентов (скачиваются при сборке)
+managed_components/
+/components/.idf/
+**/components/.idf/
+.espressif/
+
+# CMake вне папки сборки
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+CTestTestfile.cmake
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+venv/
+.venv/
+env/
+
+# VS Code: settings.json содержит локальные пути к ESP-IDF, clangd и COM-порт
+.vscode/settings.json
+
+# Индексы языковых серверов (файл .clangd с настройками хранится в git)
+.clangd/
+.cache/
+.ccls-cache/
+compile_commands.json
+
+# Временные файлы и журналы
+*~
+*.swp
+*.swo
+*.bak
+*.tmp
+*.log
+
+# Windows
+*.exe
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+.directory
+
+# Файлы IDE
+*.user
+*.workspace
+*.suo
+*.sln.docstates

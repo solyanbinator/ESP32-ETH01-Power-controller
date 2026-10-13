@@ -1,0 +1,21 @@
+# Агент выключения для ESP32 ETH01 Power controller, установка — см. power_server.py.
+#
+# Параметры в /etc/default/power-server, например:
+#   POWER_SERVER_ARGS="--port 8080 --allow 192.168.19.100 --wol-interface eno1"
+#   POWER_SERVER_TOKEN=change-me-123
+# Путь команды выключения в веб-интерфейсе ESP32 тогда: /poweroff?key=change-me-123
+# Ключ: латиница, цифры, - . _ ~ (другие символы веб-интерфейс ESP32 не примет)
+
+[Unit]
+Description=Power server for ESP32 ETH01 Power controller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/default/power-server
+ExecStart=/usr/bin/python3 /opt/power-server/power_server.py $POWER_SERVER_ARGS
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
