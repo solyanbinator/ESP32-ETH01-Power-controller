@@ -58,17 +58,6 @@ bool scenario_is_power_on(scenario_t scenario);
 // Потокобезопасный снимок состояния.
 void power_manager_get_status(power_status_t *out);
 
-#ifdef APP_TEST_HOOKS
-// Тестовая сборка: подмена входов через HTTP. -1 — читать GPIO, 0/1 — принудительный уровень.
-typedef struct {
-    int power_failure;
-    int button;
-} power_test_inputs_t;
-
-void power_manager_test_get(power_test_inputs_t *out);
-void power_manager_test_set(const power_test_inputs_t *in);
-#endif
-
 const char *mains_state_name(mains_state_t mains);
 const char *scenario_name(scenario_t scenario);
 const char *scenario_result_name(scenario_result_t result);

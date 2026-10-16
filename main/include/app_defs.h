@@ -7,6 +7,7 @@
 #define PIN_POWER_SENSE         35  // наличие сети в квартире
 #define PIN_MANUAL_BUTTON       36  // кнопка ручного сценария
 
+#define PIN_PASSWORD_RESET      2   // перемычка на GND при запуске — сброс пароля веб-интерфейса
 #define PIN_OUTPUT_1            32  // выходы, управляемые по питанию (output_manager)
 #define PIN_OUTPUT_2            33
 

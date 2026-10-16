@@ -54,16 +54,43 @@
   label.check { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 8px 0; font-size: 16px; color: var(--text); cursor: pointer; }
   input[type=checkbox] { width: 20px; height: 20px; margin: 0; accent-color: var(--green); cursor: pointer; }
   input:disabled { opacity: .45; }
+  [hidden] { display: none !important; }
+  #app { width: 100%; display: flex; flex-direction: column; align-items: center; }
+  .btn {
+    display: block; width: 100%; max-width: 555px; padding: 12px; margin: 12px 0 0;
+    border: 0; border-radius: var(--radius);
+    color: #fff; font: bold 16px Arial, sans-serif; cursor: pointer;
+  }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .green { background: var(--green); }
+  .white { background: #fff; color: #333; }
+  progress { width: 100%; height: 14px; margin-top: 10px; accent-color: var(--green); }
 </style>
 </head>
 <body>
   <h2>ESP32 ETH01 - Power controller</h2>
+
+  <div class="card" id="auth" hidden>
+    <h3 id="auth_title">Вход</h3>
+    <p class="muted" id="auth_text"></p>
+    <form id="auth_form">
+      <label for="auth_password">Пароль</label>
+      <input type="password" id="auth_password" autocomplete="current-password">
+      <div id="auth_confirm" hidden>
+        <label for="auth_password2">Пароль ещё раз</label>
+        <input type="password" id="auth_password2" autocomplete="new-password">
+      </div>
+      <div class="hint bad" id="auth_hint"></div>
+      <button class="btn green" type="submit" id="auth_submit">Войти</button>
+    </form>
+  </div>
+
+  <div id="app" hidden>
   <div class="sub muted">
     <div>ESP32: <span id="eth">–</span> | работает <span id="uptime">–</span></div>
     <div>Питание: <span id="in_power">–</span> | Кнопка: <span id="in_button">–</span></div>
     <div>Выход 1: <span id="out_io32">–</span> | Выход 2: <span id="out_io33">–</span></div>
     <div class="error" id="conn"></div>
-    <div class="error" id="test_banner"></div>
   </div>
 
   <div class="card">
@@ -171,6 +198,25 @@
     <div class="hint" id="io33_on_s_hint"></div>
   </div>
 
+  <div class="card">
+    <h3>Прошивка</h3>
+    <p>Версия: <span id="fw_version">–</span></p>
+    <p class="muted" id="fw_detail"></p>
+
+    <label for="ota_file">Файл прошивки: build/esp32_eth01_controller.bin</label>
+    <input type="file" id="ota_file" accept=".bin">
+    <label for="ota_password">Пароль для подтверждения</label>
+    <input type="password" id="ota_password" autocomplete="current-password">
+    <progress id="ota_progress" max="100" value="0" hidden></progress>
+    <div class="hint" id="ota_hint"></div>
+    <button class="btn green" id="ota_button">Обновить прошивку</button>
+    <p class="muted">После записи контроллер перезагрузится. Если новая прошивка не запустится,
+      при следующей перезагрузке вернётся предыдущая.</p>
+  </div>
+
+  <button class="btn white" id="logout">Выйти</button>
+  </div>
+
 <script>
 'use strict';
 const $ = id => document.getElementById(id);
@@ -275,6 +321,7 @@ async function save(key) {
     const r = await request('/api/config', { method: 'POST', body: new URLSearchParams({ [key]: value }) });
     const j = await r.json().catch(() => ({}));
     if (seq !== seqs[key]) return;                          // ответ на устаревшее сохранение
+    if (r.status === 401) return showAuth(j.auth);
     if (!r.ok || !j.ok) return mark(key, 'bad', j.error || 'Ошибка ' + r.status);
     applyConfig(j.config);
     if (normalized(key) !== saved[key]) return edited(key); // пока сохраняли, ввод продолжился
@@ -319,6 +366,7 @@ $('outputs_enabled').addEventListener('change', async () => {
   try {
     const r = await request('/api/config', { method: 'POST', body: new URLSearchParams({ outputs_enabled: enabled ? '1' : '0' }) });
     const j = await r.json().catch(() => ({}));
+    if (r.status === 401) showAuth(j.auth);
     if (!r.ok || !j.ok) throw new Error(j.error || 'Ошибка ' + r.status);
     hint.className = 'hint ok';
     hint.textContent = 'Сохранено';
@@ -450,20 +498,42 @@ function render(s) {
       + (o.change_in_s > 0 ? ' (' + (o.high ? 'выкл.' : 'вкл.') + ' через ' + left(o.change_in_s) + ')' : '')
       + (s.outputs.enabled ? '' : ' (управление выкл.)');
   }
-  $('test_banner').textContent = s.test_hooks
-    ? 'Тестовая прошивка: входы IO35/IO36 и ICMP подменяются через /api/test' : '';
+  const fw = s.firmware;
+  $('fw_version').textContent = fw.version;
+  $('fw_detail').textContent = 'собрана ' + fw.date + ', слот ' + fw.partition
+    + (fw.pending_verify ? ' – новая прошивка ещё проверяет работоспособность' : '');
   applyConfig(s.config);
 }
 
-let polling = false;
+let polling = false, paused = true, bootId = null, authWatch = null;
+
+// Контроллер перезагрузился (обновление прошивки, включение питания): страница загружается
+// заново целиком – новая прошивка может отдавать уже другую страницу
+async function rebooted() {
+  try {
+    const j = await (await request('/api/auth', {}, 3000)).json();
+    if (bootId && j.boot !== bootId) {
+      location.reload();
+      return true;
+    }
+  } catch (e) {}
+  return false;
+}
 
 // Следующий запрос – только после завершения предыдущего, запросы не копятся
 async function poll() {
-  if (polling) return;
+  if (polling || paused) return;
   polling = true;
   let next = 1000;
   try {
-    const s = await (await request('/status')).json();
+    const r = await request('/status');
+    const s = await r.json();
+    if (r.status === 401) {
+      // После перезагрузки контроллера сессия пропадает – сначала проверяем, не она ли это
+      if (await rebooted()) return;
+      polling = false;
+      return showAuth(s.auth);
+    }
     render(s);
     $('conn').textContent = '';
     if (s.command.busy) next = 500;
@@ -471,10 +541,179 @@ async function poll() {
     $('conn').textContent = 'Нет связи с ESP32';
   }
   polling = false;
-  setTimeout(poll, next);
+  if (!paused) setTimeout(poll, next);
 }
 
-poll();
+// ---------- Вход и установка пароля ----------
+
+let authMode = 'login';
+
+function showAuth(mode, message) {
+  paused = true;
+  clearInterval(authWatch);
+  authWatch = setInterval(rebooted, 5000);
+  authMode = mode === 'setup' ? 'setup' : 'login';
+  const setup = authMode === 'setup';
+  $('app').hidden = true;
+  $('auth').hidden = false;
+  $('auth_title').textContent = setup ? 'Установка пароля' : 'Вход';
+  $('auth_text').textContent = message || (setup
+    ? 'Задайте пароль веб-интерфейса, не короче 6 символов. Сбросить его можно перемычкой IO2-GND при включении контроллера.'
+    : '');
+  $('auth_confirm').hidden = !setup;
+  $('auth_password').autocomplete = setup ? 'new-password' : 'current-password';
+  $('auth_submit').textContent = setup ? 'Сохранить пароль' : 'Войти';
+  $('auth_hint').textContent = '';
+  $('auth_password').value = '';
+  $('auth_password2').value = '';
+  $('auth_password').focus();
+}
+
+function showApp() {
+  clearInterval(authWatch);
+  $('auth').hidden = true;
+  $('app').hidden = false;
+  loaded = false;
+  paused = false;
+  poll();
+}
+
+$('auth_form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const password = $('auth_password').value, hint = $('auth_hint');
+  if (authMode === 'setup') {
+    const bytes = new TextEncoder().encode(password).length;
+    if (bytes < 6) return hint.textContent = 'Пароль не короче 6 символов';
+    if (bytes > 64) return hint.textContent = 'Пароль слишком длинный';
+    if (password !== $('auth_password2').value) return hint.textContent = 'Пароли не совпадают';
+  }
+  $('auth_submit').disabled = true;
+  try {
+    const r = await request('/api/' + authMode, { method: 'POST', body: new URLSearchParams({ password }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.ok) return showApp();
+    if (j.auth && j.auth !== authMode) return showAuth(j.auth);
+    hint.textContent = j.error || 'Ошибка ' + r.status;
+  } catch (err) {
+    hint.textContent = 'Нет связи с ESP32';
+  } finally {
+    $('auth_submit').disabled = false;
+  }
+});
+
+$('logout').onclick = async () => {
+  await request('/api/logout', { method: 'POST' }).catch(() => {});
+  showAuth('login');
+};
+
+// Результат обновления, если страница перезагрузилась после записи прошивки
+function takeOtaResult(j) {
+  let expected = null;
+  try {
+    expected = JSON.parse(sessionStorage.getItem('ota_expected'));
+    sessionStorage.removeItem('ota_expected');
+  } catch (e) {}
+  if (!expected) return '';
+  return j.version === expected.version && j.build === expected.build
+    ? 'Прошивка обновлена до версии ' + j.version + '. Войдите снова.'
+    : 'Новая прошивка не запустилась, работает версия ' + j.version + ' (собрана ' + j.build + ').';
+}
+
+async function start() {
+  try {
+    const j = await (await request('/api/auth')).json();
+    bootId = j.boot;
+    const otaResult = takeOtaResult(j);
+    if (j.authenticated) {
+      showApp();
+      if (otaResult) otaHint('ok', otaResult);
+      return;
+    }
+    showAuth(j.setup_required ? 'setup' : 'login', otaResult || (j.reset_by_jumper
+      ? 'Пароль сброшен перемычкой IO2. Задайте новый и снимите перемычку, иначе пароль будет сбрасываться при каждом включении.'
+      : ''));
+  } catch (e) {
+    $('auth_text').textContent = 'Нет связи с ESP32, повтор…';
+    $('auth').hidden = false;
+    setTimeout(start, 2000);
+  }
+}
+
+// ---------- Обновление прошивки ----------
+
+function resumePolling() {
+  paused = false;
+  poll();
+}
+
+function otaHint(cls, text) {
+  $('ota_hint').className = 'hint ' + cls;
+  $('ota_hint').textContent = text;
+}
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// После записи контроллер перезагружается: ждём новый запуск и перезагружаем страницу.
+// Что записали – запоминаем: после перезагрузки страница сверит версию и время сборки.
+async function waitReboot(expected) {
+  try {
+    sessionStorage.setItem('ota_expected', JSON.stringify(expected));
+  } catch (e) {}
+  paused = true;
+  for (const deadline = Date.now() + 120000; Date.now() < deadline;) {
+    await sleep(1500);
+    if (await rebooted()) return;
+  }
+  $('ota_button').disabled = false;
+  otaHint('bad', 'Контроллер не ответил после перезагрузки');
+}
+
+$('ota_button').onclick = () => {
+  const file = $('ota_file').files[0], password = $('ota_password').value;
+  if (!file) return otaHint('bad', 'Выберите файл прошивки');
+  if (!password) return otaHint('bad', 'Введите пароль');
+  if (!confirm('Записать ' + file.name + ' и перезагрузить контроллер?')) return;
+
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api/ota');
+  xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+  xhr.setRequestHeader('X-Password', encodeURIComponent(password));
+  xhr.upload.onprogress = e => {
+    if (!e.lengthComputable) return;
+    const pct = Math.round(e.loaded / e.total * 100);
+    $('ota_progress').value = pct;
+    otaHint('pending', pct < 100 ? 'Загрузка ' + pct + ' %' : 'Проверка образа…');
+  };
+  xhr.onload = () => {
+    let j = {};
+    try { j = JSON.parse(xhr.responseText); } catch (e) {}
+    $('ota_progress').hidden = true;
+    $('ota_password').value = '';
+    if (xhr.status === 200 && j.ok) {
+      otaHint('ok', 'Записана версия ' + j.version + ', перезагрузка…');
+      return waitReboot({ version: j.version, build: j.build });
+    }
+    $('ota_button').disabled = false;
+    if (xhr.status === 401) return showAuth(j.auth);
+    otaHint('bad', j.error || 'Ошибка ' + xhr.status);
+    resumePolling();
+  };
+  xhr.onerror = () => {
+    $('ota_progress').hidden = true;
+    $('ota_button').disabled = false;
+    otaHint('bad', 'Нет связи с ESP32');
+    resumePolling();
+  };
+  // Во время записи во flash опрос состояния не нужен и только нагружает контроллер
+  paused = true;
+  $('ota_button').disabled = true;
+  $('ota_progress').value = 0;
+  $('ota_progress').hidden = false;
+  otaHint('pending', 'Загрузка 0 %');
+  xhr.send(file);
+};
+
+start();
 </script>
 </body>
 </html>

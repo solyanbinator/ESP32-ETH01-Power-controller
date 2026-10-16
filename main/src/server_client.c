@@ -32,30 +32,6 @@ static SemaphoreHandle_t s_lock;
 static server_status_t s_status;
 static int s_pending;
 
-#ifdef APP_TEST_HOOKS
-static volatile bool s_test_icmp_enabled = true;
-
-void server_client_test_set_icmp(bool enabled)
-{
-    s_test_icmp_enabled = enabled;
-    ESP_LOGW(TAG, "Test: ICMP check %s", enabled ? "enabled" : "disabled");
-}
-
-bool server_client_test_icmp_enabled(void)
-{
-    return s_test_icmp_enabled;
-}
-#endif
-
-static bool icmp_enabled(void)
-{
-#ifdef APP_TEST_HOOKS
-    return s_test_icmp_enabled;
-#else
-    return true;
-#endif
-}
-
 static int64_t now_ms(void)
 {
     return esp_timer_get_time() / 1000;
@@ -254,7 +230,7 @@ static void check_server(const app_config_t *cfg, check_result_t *r)
         return;
     }
 
-    r->icmp_ok = icmp_enabled() && icmp_ping(cfg->ip, &r->icmp_rtt_ms);
+    r->icmp_ok = icmp_ping(cfg->ip, &r->icmp_rtt_ms);
     r->http_enabled = cfg->ping_path[0] != '\0';
     if (r->http_enabled) {
         r->http_ok = http_get(cfg, cfg->ping_path, r->http_detail, sizeof(r->http_detail));

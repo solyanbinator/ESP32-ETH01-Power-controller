@@ -1,9 +1,11 @@
 #include "app_config.h"
+#include "auth_manager.h"
 #include "esp_log.h"
 #include "ethernet_manager.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "led_manager.h"
+#include "ota_manager.h"
 #include "output_manager.h"
 #include "power_manager.h"
 #include "server_client.h"
@@ -36,16 +38,16 @@ static void update_indication(void)
 void app_main(void)
 {
     ESP_ERROR_CHECK(app_config_init());
+    ESP_ERROR_CHECK(auth_init());
+    ota_manager_init();
     led_manager_init();
     output_manager_init();
     power_manager_init();
     ESP_ERROR_CHECK(ethernet_manager_start());
     ESP_ERROR_CHECK(server_client_start());
     ESP_ERROR_CHECK(web_server_start());
+    ota_manager_start_validation();
     ESP_LOGI(TAG, "ESP32 ETH01 controller started");
-#ifdef APP_TEST_HOOKS
-    ESP_LOGW(TAG, "TEST BUILD: IO35/IO36 and ICMP can be overridden via POST /api/test");
-#endif
 
     // Главный цикл ничего не ждёт по сети: запросы к серверу выполняет задача server_client.
     while (true) {

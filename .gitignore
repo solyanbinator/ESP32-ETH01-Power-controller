@@ -7,6 +7,8 @@ build*/
 *.elf
 *.map
 flasher_args.json
+# Готовая прошивка для быстрой прошивки хранится в git (копируется туда при каждой сборке)
+!firmware/*.bin
 
 # Конфигурация ESP-IDF: sdkconfig создаётся из sdkconfig.defaults
 sdkconfig

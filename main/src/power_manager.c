@@ -30,24 +30,6 @@ static int64_t s_last_send_ms;      // когда сценарий отправ�
 // ещё выключаться, и онлайн-состояние в шаге «включение» нельзя считать результатом.
 static bool s_shutdown_pending;
 
-#ifdef APP_TEST_HOOKS
-static volatile int s_test_power_failure = -1;
-static volatile int s_test_button = -1;
-
-void power_manager_test_get(power_test_inputs_t *out)
-{
-    out->power_failure = s_test_power_failure;
-    out->button = s_test_button;
-}
-
-void power_manager_test_set(const power_test_inputs_t *in)
-{
-    s_test_power_failure = in->power_failure;
-    s_test_button = in->button;
-    ESP_LOGW(TAG, "Test inputs: power_failure=%d button=%d", in->power_failure, in->button);
-}
-#endif
-
 const char *mains_state_name(mains_state_t mains)
 {
     switch (mains) {
@@ -104,21 +86,11 @@ static int64_t now_ms(void)
 
 static bool read_power_failure(void)
 {
-#ifdef APP_TEST_HOOKS
-    if (s_test_power_failure >= 0) {
-        return s_test_power_failure;
-    }
-#endif
     return gpio_get_level(PIN_POWER_SENSE) == POWER_FAILURE_LEVEL;
 }
 
 static bool read_button(void)
 {
-#ifdef APP_TEST_HOOKS
-    if (s_test_button >= 0) {
-        return s_test_button;
-    }
-#endif
     return gpio_get_level(PIN_MANUAL_BUTTON) == BUTTON_ACTIVE_LEVEL;
 }
 

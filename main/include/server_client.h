@@ -56,11 +56,5 @@ void server_client_recheck(void);
 server_state_t server_client_get_state(void);
 void server_client_get_status(server_status_t *out);
 
-#ifdef APP_TEST_HOOKS
-// Тестовая сборка: не выполнять ICMP-проверку (ноутбук с эмулятором сам отвечает на ping).
-void server_client_test_set_icmp(bool enabled);
-bool server_client_test_icmp_enabled(void);
-#endif
-
 const char *server_state_name(server_state_t state);
 const char *server_cmd_name(server_cmd_t cmd);
